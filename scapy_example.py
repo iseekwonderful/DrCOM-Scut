@@ -126,9 +126,9 @@ class AccessControl:
 
 
 if __name__ == '__main__':
-    username = "student_id"
-    passwd = "passwd"
+    username = "201520133579"
+    passwd = "201520133579"
     # in linux may be ethX, in OSX may be enX
-    iface = "eth0.2"
+    iface = "eth0"
     AccessControl(username, passwd, iface)
 

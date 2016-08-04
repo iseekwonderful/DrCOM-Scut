@@ -1,8 +1,12 @@
 ## Python版 scut drcom 认证
 
+## Panding..
+## 请前往使用 https://github.com/scutclient/pyscutclient_drcom scapy版
+
+
 ### 8月2日更新:
 1. 去除`scapy`依赖, 方便在openwrt上运行, 只需要安装`python-simple`和`python-codec`, 和 `coreutils-nohup`包（大小在2.7M左右，如果你的flash是4M的话需要外挂u盘）.
-2. 修复keep-alive问题。在C14测试稳定。
+2. ~~修复keep-alive问题。在C14测试稳定~~。
 
 ###  Warning:
 1. macOS 不支持 python 2.7 的raw socket, 请使用scapy_example.py
@@ -24,3 +28,8 @@ Flash >= 8M 或 外挂U盘
 ### 资源占用: 
 在NewWifi mini(MT7620, 128M RAM, 16M Flash)上:
 	`6250  6196 root     S     7956   6%   0% python openwrt.py`
+
+Python 客户端更新：https://github.com/iseekwonderful/DrCOM-Scut
+1. 去掉scapy依赖，只需要python-mini 和 python-codec
+2. 解决掉线问题
+使用树莓派或cpu不支持的同学可以试下

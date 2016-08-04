@@ -1,6 +1,12 @@
 ## Python版 scut drcom 认证
 
-## Panding..
+## 8月5日
+更新udp认证
+bug: 一次断开后，第二次链接有问题，可能是下线包发送有问题。
+`[Critical]: Server Reject Due to auth left in server, retry in few minutes`
+出现后下次断开重连即可
+
+## Scapy版客户端.
 ## 请前往使用 https://github.com/scutclient/pyscutclient_drcom scapy版
 
 

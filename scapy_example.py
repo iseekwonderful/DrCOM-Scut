@@ -9,6 +9,7 @@ import hashlib
 import time
 import sh
 import traceback
+import udp_auth
 
 
 def get_md5_result(id, md5_data, passwd):
@@ -29,6 +30,7 @@ class DrComSupplicant(Process):
         self.is_start_send = False
         self.is_done = False
         self.last_keep_alive = time.time()
+        self.md5_load = None
 
     def _force_disconnect(self):
         for x in range(3):
@@ -57,6 +59,7 @@ class DrComSupplicant(Process):
         print("Client -> Server: Response, MD5")
         md5_con = '\x10' + get_md5_result(md5_req[0].id, md5_req[0].payload.load[1:17], self.password) + \
                   self.password + '\x00Da*\x00}\xd8\xeeV'
+        self.md5_load = md5_con
         md5_res = Ether(dst=self.dst, src=get_if_hwaddr(self.iface)) / EAPOL(version=1) / EAP(code=2, id=0, type="MD5") \
                   / Raw(load=md5_con) / Padding(load=chr(0) * 36)
         sendp(md5_res, verbose=False)
@@ -90,7 +93,9 @@ class DrComSupplicant(Process):
                 return self.send_md5_response(packet)
             elif packet[EAP].code == 3:
                 self.is_done = True
-                print("SUCCESS")
+                print("SUCCESS, udp auth")
+                udp = udp_auth.UDPKeepAlive("201520133579", "201520133579", self.md5_load)
+                udp.run()
         except:
             pass
 
@@ -115,7 +120,7 @@ class AccessControl:
     def test_access():
         try:
             res = sh.ping("-c", "4", "114.114.114.114")
-            result = re.findall(r"(\d) received", str(res))[0]
+            result = re.findall(r"(\d) packets received", str(res))[0]
             if int(result[0]) > 0:
                 return True
         except:
@@ -129,6 +134,6 @@ if __name__ == '__main__':
     username = "201520133579"
     passwd = "201520133579"
     # in linux may be ethX, in OSX may be enX
-    iface = "eth0"
+    iface = "en0"
     AccessControl(username, passwd, iface)
 

@@ -1,3 +1,5 @@
+# coding: utf-8
+
 from struct import pack, unpack
 from fcntl import ioctl
 import socket
@@ -5,6 +7,7 @@ from hashlib import md5
 from select import select
 import time
 import sys
+import udp_auth
 
 
 class Utils:
@@ -24,10 +27,20 @@ class Utils:
         ))
         return hw_addr
 
+    @staticmethod
+    def get_ip_address(iface):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        return socket.inet_ntoa(ioctl(
+            s.fileno(),
+            0x8915,  # SIOCGIFADDR
+            pack('256s', iface[:15])
+        )[20:24])
+
 
 class DrComSupplicant:
     def __init__(self, iface, username, password):
         self.ETH_P_PAE = 0x888E
+        self.ETH_P_IP = 0x0800
         self.iface = iface
         self.state = 0
         self.username = username
@@ -36,9 +49,24 @@ class DrComSupplicant:
         self.sock = socket.socket(17, socket.SOCK_RAW, socket.htons(self.ETH_P_PAE))
         self.sock.bind((iface, 0))
         self.if_index = Utils.get_ip_index(self.sock, self.iface)
+        self.hw_addr_text = ":".join([x.encode('hex') for x in Utils.get_hw_addr(self.sock, self.iface)])
         self.hw_addr = Utils.get_hw_addr(self.sock, self.iface)
         self.pae_group_addr = b"\x01\x80\xc2\x00\x00\x03"
         self.last_start = None
+        self.md5_load = None
+        self.udp_process = None
+        self.ip_addr = Utils.get_ip_address(self.iface)
+        self._info()
+
+    def _info(self):
+        print("Python Version of DrCom in Scut\n---------------------------\n"
+              "By Sheep\nScut Router QQ group: 262939451\n------------------------\n"
+              "Ip: {}\nMac: {}".format(
+            self.ip_addr, self.hw_addr_text
+        ))
+        print("Username: {}\nPassword: {}\nInterface: {}".format(
+            self.username, self.password, self.iface
+        ))
 
     def make_ether_header(self, near=False):
         if near:
@@ -56,7 +84,7 @@ class DrComSupplicant:
         X_TYPE_START = 1
         pkt = self.make_ether_header(near=True) + self.make_8021x_header(X_TYPE_START, 0) + b'\x00' * 78
         self.sock.send(pkt)
-        print("Send Start Packet")
+        print("[EAP]: Send Start Packet")
         self.last_start = time.time()
         self.state = 0
 
@@ -67,9 +95,8 @@ class DrComSupplicant:
         else:
             pkt = self.make_ether_header() + self.make_8021x_header(X_TYPE_START, 0)
         self.sock.send(pkt)
-        print("Disconnect from Server")
+        print("[EAP]: Disconnect from Server")
         self.state = 0
-
 
     def handle(self):
         # EAP Type and code define
@@ -88,20 +115,18 @@ class DrComSupplicant:
 
         # Ethernet check
         ether_dst, ether_src, ether_type = unpack('>6s6sH', data[:14])
-        # print ether_dst.encode("hex"), self.pae_group_addr.encode("hex")
         if (ether_dst != self.hw_addr and self.state != 10) or ether_type != self.ETH_P_PAE:
-            print("Ethernet check failed : dst:{} type: {}".format(
+            print("[EAP]: Ethernet check failed : dst:{} type: {}".format(
                 ether_dst.encode('hex'), ether_type))
             return
 
         if self.server_hw_addr is None:
             self.server_hw_addr = ether_src
-            #print("Server mac address is {}".format(self.server_hw_addr.encode("hex")))
 
         # 802.1X check
         a_8021x_ver, a_8021x_type, a_8021x_length = unpack('>BBH', data[14:18])
         if a_8021x_ver != 1 and a_8021x_type != 0:
-            print('802.1X check failed: ver={} type={}'.format(
+            print('[EAP]: 802.1X check failed: ver={} type={}'.format(
                 a_8021x_ver, a_8021x_type))
             return
 
@@ -109,7 +134,7 @@ class DrComSupplicant:
         eap_code, eap_id, eap_length = unpack('>BBH', data[18:22])
         # print("code: {}, id: {}, length: {} state: {}".format(eap_code, eap_id, eap_length, self.state))
         if eap_length > len(data) - 18 or eap_length != a_8021x_length:
-            print('EAP length check failed: len={} len(802.1X)={}'.format(
+            print('[EAP]: EAP length check failed: len={} len(802.1X)={}'.format(
                 eap_length, a_8021x_length))
             return
 
@@ -117,7 +142,7 @@ class DrComSupplicant:
             if eap_code == EAP_CODE_REQUEST and eap_length >= 5:
                 eap_type = unpack('B', data[22:23])[0]
                 if eap_type == EAP_TYPE_IDENTITY:
-                    print("Server->Client: Identify")
+                    print("[EAP]: Server->Client: Identify")
                     eap_pkt = self.make_eap_pkt(
                         EAP_CODE_RESPONSE, eap_id,
                         pack('B%ds' % len(self.username), EAP_TYPE_IDENTITY, self.username))
@@ -126,7 +151,7 @@ class DrComSupplicant:
                     pkt += eap_pkt
                     self.sock.send(pkt)
 
-                    print("Client->Server: ID Response")
+                    print("[EAP]: Client->Server: ID Response")
 
                     self.state = 1
             else:
@@ -135,7 +160,7 @@ class DrComSupplicant:
             if eap_code == EAP_CODE_REQUEST and eap_length >= 5:
                 eap_type = unpack('B', data[22:23])[0]
                 if eap_type == EAP_TYPE_MD5CHALLENGE:
-                    print("Server->client: MD5 Challenge")
+                    print("[EAP]: Server->client: MD5 Challenge")
                     eap_value_size = unpack('B', data[23: 24])[0]
                     if eap_value_size != eap_length - 10:
                         print('State 1 wrong MD5 challenge eap-Len: {}, value_len: {}'.format(
@@ -148,31 +173,42 @@ class DrComSupplicant:
                     eap_pkt = self.make_eap_pkt(EAP_CODE_RESPONSE, eap_id, pack(
                         'BB16s{}s'.format(len(extra)), EAP_TYPE_MD5CHALLENGE, 16, response, extra
                     ))
+                    self.md5_load = '\x10' + response
+                    print("Sended md5 is {}".format(self.md5_load.encode("hex")))
                     pkt += self.make_8021x_header(X_TYPE_EAP_PACKET, len(eap_pkt))
                     pkt += eap_pkt
                     self.sock.send(pkt)
 
-                    print("Client->Server: Md5 Challenge Response")
+                    print("[EAP]: Client->Server: Md5 Challenge Response")
                     self.state = 2
                     return
             elif eap_code == EAP_CODE_FAILURE and eap_length == 4:
-                print("Wrong identity")
+                print("[EAP]: Wrong identity")
                 return
             else:
-                print("EAP Identity Check failed")
+                print("[EAP]: EAP Identity Check failed")
                 return
         elif self.state == 2:
             if eap_code == EAP_CODE_SUCCESS and eap_length == 4:
-                print("Success!")
+                print("[EAP]: Success!")
+                if self.udp_process:
+                    # make current listen loop die
+                    self.udp_process.should_listen = False
+                    self.udp_process.restart()
+                else:
+                    self.udp_process = udp_auth.UDPKeepAlive(self.username, self.password,
+                                                             self.md5_load, self.ip_addr, self.hw_addr_text)
+                    self.udp_process.daemon = True
+                    self.udp_process.start()
                 self.state = 10
             else:
-                print("Failed!")
+                print("[EAP]: Failed!")
                 exit(1)
         elif self.state == 10:
             if eap_code == EAP_CODE_REQUEST and eap_length >= 5:
                 eap_type = unpack('B', data[22:23])[0]
                 if eap_type == EAP_TYPE_IDENTITY:
-                    print("Server->Client: Identify")
+                    print("[EAP]: Server->Client: Identify")
                     eap_pkt = self.make_eap_pkt(
                         EAP_CODE_RESPONSE, eap_id,
                         pack('B%ds' % len(self.username), EAP_TYPE_IDENTITY, self.username))
@@ -181,8 +217,9 @@ class DrComSupplicant:
                     pkt += eap_pkt
                     self.sock.send(pkt)
 
-                    print("Client->Server: ID Response")
+                    print("[EAP]: Client->Server: ID Response")
             elif eap_code == EAP_CODE_FAILURE:
+                print("[Critical]: EAP_Failure Captured")
                 self.state = 0
                 self.send_start()
             else:
@@ -225,11 +262,14 @@ if __name__ == '__main__':
             print("usage: python openwrt.py -u username -p password -i iface\n"
                   "please put parameter after the option like: -u 200011112222")
             exit(1)
+    print("username:{}\npassword:{}\ninterface:{}".format(username, password, iface))
     dr = DrComSupplicant(iface, username, password)
     # dr = DrComSupplicant('eth0.2', '201520133579', '201520133579')
     try:
         dr.run()
     except KeyboardInterrupt:
-        print("use ended disconnect")
-        for x in range(1):
-            dr.send_logoff()
+        print("Killing~")
+        if dr.udp_process:
+            dr.udp_process.should_listen = False
+        dr.send_logoff()
+        time.sleep(2)
